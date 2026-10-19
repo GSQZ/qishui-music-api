@@ -1,0 +1,26 @@
+import { createRequire } from 'node:module';
+import { describe, expect, it, vi } from 'vitest';
+import { track } from './fixtures';
+
+// Scene request state belongs to the protocol package.
+const { createFeed } = createRequire(import.meta.url)('../src/feed.cjs');
+describe('car stream request state', () => {
+    it('nests scene IDs and restarts on A-to-B-to-A switches, while continuation keeps the scene', async () => {
+        const bodies: any[] = [];
+        const platform = vi.fn(async (_path, body) => { bodies.push(body); return { items: [{ entity: { media: { track_entity: track() } } }], has_more: true }; });
+        const feed = createFeed({ platform });
+        await feed.songs({ scene: '33' }); await feed.songs({ scene: '33' }); await feed.songs({ scene: '8' }); await feed.songs({ scene: '33' });
+        expect(bodies.map(body => body.is_first_request)).toEqual([true, false, true, true]);
+        expect(bodies.map(body => body.with_client_cache)).toEqual([false, true, false, false]);
+        expect(bodies.map(body => body.feed_preference.scene_mode_id)).toEqual([33, 33, 8, 33]);
+        expect(bodies.every(body => body.cursor === undefined && body.scene_mode_id === undefined)).toBe(true);
+    });
+    it('drops an in-flight account stream if the listener signs out', async () => {
+        let release!: (value: unknown) => void;
+        const platform = vi.fn(() => new Promise(resolve => { release = resolve; }));
+        const feed = createFeed({ platform }); const pending = feed.songs({ scene: '33' });
+        await vi.waitFor(() => expect(platform).toHaveBeenCalled()); feed.clear();
+        release({ items: [], has_more: false });
+        await expect(pending).rejects.toMatchObject({ code: 'unavailable' });
+    });
+});

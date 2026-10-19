@@ -1,0 +1,22 @@
+{
+    "name": "qishui-music-api",
+    "version": "0.1.0",
+    "description": "Qishui Music car protocol client for Node.js and Electron main processes",
+    "license": "MIT",
+    "author": "sayqz",
+    "repository": { "type": "git", "url": "git+https://github.com/GSQZ/qishui-music-api.git" },
+    "bugs": { "url": "https://github.com/GSQZ/qishui-music-api/issues" },
+    "homepage": "https://github.com/GSQZ/qishui-music-api#readme",
+    "main": "index.cjs",
+    "types": "index.d.cts",
+    "exports": { ".": { "types": "./index.d.cts", "default": "./index.cjs" } },
+    "files": ["index.cjs", "index.d.cts", "src/*.cjs", "README.md", "LICENSE", "CHANGELOG.md"],
+    "engines": { "node": ">=24.0.0" },
+    "scripts": {
+        "test": "vitest run --maxWorkers=4",
+        "typecheck": "tsc --noEmit --strict --types node --module nodenext --target es2022 test/types.mts",
+        "prepublishOnly": "npm run typecheck && npm test"
+    },
+    "publishConfig": { "access": "public", "registry": "https://registry.npmjs.org/" },
+    "devDependencies": { "@types/node": "26.6.2", "typescript": "7.0.2", "vitest": "4.1.11" }
+}
