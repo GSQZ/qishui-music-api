@@ -5,7 +5,7 @@
 ## 安装
 
 ```sh
-npm install --save-exact qishui-music-api@0.2.0
+npm install --save-exact qishui-music-api@0.2.1
 ```
 
 ## 使用
@@ -32,6 +32,8 @@ const result = await api.request('search', { query: '晴天', limit: 20, offset:
 账号读取与写入操作：`liked_songs`、`like_song`（`{ id, liked }`）、`playlist_add_tracks` / `playlist_remove_tracks`（`{ id, ids }`，单次最多 100 首）、`recent_played`、`check_tracks`（`{ ids }`）、`dislike_song`（`{ id, disliked }`）。写操作与账号读取需要已登录会话；车机接口没有专辑详情、新建歌单、收藏歌单/专辑的端点，这些操作不提供。
 
 `sessions.get/set/clear` 都是同步方法，每次写入或清除都要增加 `revision`。宿主负责存储、加密和 IPC 白名单；包不读写磁盘、不导入 Electron，也不开本地服务。`fetch` 可替换为 Electron 的 `net.fetch`。会话只允许在可信主进程内使用，不要将 ticket、私钥或原始会话交给网页，也不要记录会话内容。
+
+公共读取使用独立于账号 ticket-guard 的客户端令牌。已知读取端点收到明确的令牌过期错误 `28001008` 时，会丢弃该代令牌、合并并发刷新，并最多重试一次；不会据此清除账号或要求重新扫码，也不假定令牌的固定有效期。刷新失败会返回错误，后续独立请求可重新获取；一般网络/HTTP 错误不会触发令牌刷新。账号读取和喜欢、歌单编辑、不感兴趣等写入使用 ticket-guard，失败时不会套用公共令牌恢复，也不会自动重放写操作。
 
 包只使用用户在调用方主动扫码授权的会话，不读取其他应用的凭据，不加载官方客户端原生模块或依赖泄漏源码。播放只选择接口返回的未加密资源；只有受保护音频时返回错误，不解密音频、不提取音频密钥（因此车机接口的 `higher` / `highest` / `lossless` 档位无法提供，只提供未加密的 `standard`）。返回的试听资源保留 `preview` 标记，车机给出片段起点时一并返回 `clipStartMs`（类型 `QishuiAudioSource`）。
 
