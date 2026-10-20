@@ -18,6 +18,13 @@ describe('Qishui plaintext playback', () => {
     it('marks a preview resource so Folia will show its notice and avoid caching it as a song', async () => {
         const result = await resolveAudio({ http: async () => ({ data: { PlayInfoList: [{ MainPlayUrl: audio }] } }) }, info(true), 'standard');
         expect(result.preview).toBe(true);
+        expect(result).not.toHaveProperty('clipStartMs');
+    });
+    it('reports where a preview clip starts inside the song', async () => {
+        const track = { player_info: { preview: { duration: { start_ms: 208320, duration_ms: 60001 },
+            video_model_info: { url_player_info: vod } } } };
+        const result = await resolveAudio({ http: async () => ({ data: { PlayInfoList: [{ MainPlayUrl: audio }] } }) }, track, 'standard');
+        expect(result).toMatchObject({ preview: true, clipStartMs: 208320 });
     });
     it('rejects protected-only audio even when a model contains a downloadable URL', async () => {
         const protectedTrack = { player_info: { full: { video_model_info: { video_model: JSON.stringify({ video_list: [

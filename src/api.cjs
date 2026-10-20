@@ -3,12 +3,14 @@ const { createClient, QishuiError } = require('./client.cjs');
 const { createAuth } = require('./auth.cjs');
 const { createCatalog, publicTrack } = require('./catalog.cjs');
 const { createFeed } = require('./feed.cjs');
+const { createLibrary } = require('./library.cjs');
 const { resolveAudio } = require('./playback.cjs');
 
 // Public operations never accept an arbitrary host, token, raw request or signing key.
 const QISHUI_OPERATIONS = Object.freeze(['login_status', 'logout', 'login_qr_key', 'login_qr_create', 'login_qr_check', 'login_qr_cancel',
     'search', 'search_playlists', 'song_detail', 'audio', 'lyrics', 'user_playlists', 'playlist_detail', 'playlist_tracks',
-    'artist_detail', 'artist_songs', 'feed', 'feed_modes']);
+    'artist_detail', 'artist_songs', 'feed', 'feed_modes',
+    'liked_songs', 'like_song', 'playlist_add_tracks', 'playlist_remove_tracks', 'recent_played', 'check_tracks', 'dislike_song']);
 const idOf = value => {
     if (typeof value !== 'string' || !/^\d{1,30}$/.test(value)) throw new QishuiError('invalid-response', 'Invalid Qishui media ID');
     return value;
@@ -23,6 +25,7 @@ function createQishuiApi(options) {
     const auth = createAuth(client, options);
     const catalog = createCatalog(client);
     const feed = createFeed(client);
+    const library = createLibrary(client);
     const nowUser = () => sessions.get()?.userId || null;
     return {
         async request(operation, raw = {}) {
@@ -68,6 +71,17 @@ function createQishuiApi(options) {
                     case 'feed_modes': data = await feed.modes(); break;
                     case 'feed': data = await feed.songs({ scene: raw.scene, preference: raw.preference,
                         queue: raw.queue === 'explore' ? 'explore' : 'fm', first: raw.first === true, count: limit }); break;
+                    case 'liked_songs': data = await library.likedSongs(); break;
+                    case 'like_song': await library.likeSong({ id: idOf(raw.id), liked: raw.liked }); data = null; break;
+                    case 'playlist_add_tracks':
+                        await library.editPlaylist({ operation: 'add', id: idOf(raw.id), ids: raw.ids }); data = null; break;
+                    case 'playlist_remove_tracks':
+                        await library.editPlaylist({ operation: 'remove', id: idOf(raw.id), ids: raw.ids }); data = null; break;
+                    case 'recent_played': data = await library.recentPlayed({ limit, offset }); break;
+                    case 'check_tracks': data = await library.checkTracks({ ids: raw.ids }); break;
+                    case 'dislike_song':
+                        if (typeof raw.disliked !== 'boolean') throw new QishuiError('invalid-response', 'Invalid Qishui dislike');
+                        await library.dislikeSong({ id: idOf(raw.id), disliked: raw.disliked }); data = null; break;
                     default:
                         data = p.query === '' ? { items: [], hasMore: false, nextOffset: offset } : await catalog[operation](p);
                 }

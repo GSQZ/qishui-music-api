@@ -2,7 +2,9 @@
 export type QishuiOperation = 'login_status' | 'logout' | 'login_qr_key' | 'login_qr_create'
     | 'login_qr_check' | 'login_qr_cancel' | 'search' | 'search_playlists' | 'song_detail'
     | 'audio' | 'lyrics' | 'user_playlists' | 'playlist_detail' | 'playlist_tracks'
-    | 'artist_detail' | 'artist_songs' | 'feed' | 'feed_modes';
+    | 'artist_detail' | 'artist_songs' | 'feed' | 'feed_modes'
+    | 'liked_songs' | 'like_song' | 'playlist_add_tracks' | 'playlist_remove_tracks'
+    | 'recent_played' | 'check_tracks' | 'dislike_song';
 export type QishuiJsonValue = string | number | boolean | null | QishuiJsonValue[] | { [key: string]: QishuiJsonValue };
 export type QishuiParams = Record<string, QishuiJsonValue | undefined>;
 export type QishuiErrorCode = 'unsupported' | 'invalid-response' | 'auth-required' | 'unavailable' | 'network' | 'not-playable';
@@ -37,6 +39,21 @@ export interface QishuiSessionStore {
     get(): QishuiSession | null;
     set(session: QishuiSession): void;
     clear(): void;
+}
+/** The plaintext source `audio` returns. `clipStartMs` marks where a preview clip starts in the song. */
+export interface QishuiAudioSource {
+    url: string;
+    quality: 'standard' | 'high' | 'lossless' | 'hires';
+    fetchedAt: number;
+    expiresAt?: number;
+    preview: boolean;
+    clipStartMs?: number;
+}
+/** One track's playability answer from `check_tracks`; riskResult 0 means playable. */
+export interface QishuiTrackCheck {
+    id: string;
+    riskResult: number;
+    status: number;
 }
 export interface QishuiApiOptions {
     deviceId: string;

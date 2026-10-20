@@ -4,7 +4,7 @@ const { QISHUI_PREFIX: PREFIX, QISHUI_UA: UA, qishuiParams, qishuiGuardHeaders }
 class QishuiError extends Error {
     constructor(code, message, upstreamCode) { super(message); this.code = code; this.upstreamCode = upstreamCode; }
 }
-const AUTH_CODES = [28001003, 28001007, 10007];
+const AUTH_CODES = [28001003, 28001007, 28001008, 10007];
 function checked(data) {
     if (!data || typeof data !== 'object' || Array.isArray(data)) throw new QishuiError('invalid-response', 'Invalid Qishui response');
     const code = Number(data.err_no ?? data.data?.error_code ?? 0);
@@ -60,6 +60,16 @@ function createClient({ sessions, fetch: fetcher = globalThis.fetch }) {
         if (!data.data || typeof data.data !== 'object') throw new QishuiError('invalid-response', 'Qishui data is missing');
         return data.data;
     }
-    return { http, query, platform, sessions };
+    // Account writes (collect/playlist/dislike) use the ticket-guard credential and may answer without data.
+    async function command(path, body = {}) {
+        const credential = sessions.get();
+        if (!credential) throw new QishuiError('auth-required', 'Sign in to Qishui first');
+        const { data } = await http(query(`https://open.douyin.com${PREFIX}${path}`, {}, credential.deviceId), {
+            body: { ...body, common_params: { ...(credential.userId ? { user_id: credential.userId } : {}) } },
+            headers: qishuiGuardHeaders(credential, path),
+        });
+        return data.data && typeof data.data === 'object' ? data.data : {};
+    }
+    return { http, query, platform, command, sessions };
 }
 module.exports = { createClient, QishuiError, mediaUrl };

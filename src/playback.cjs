@@ -35,8 +35,10 @@ async function resolveAudio(client, track, requested, onAudioSource = () => {}) 
         const source = (allowed.length ? allowed : candidates).sort((a, b) => rank(b.quality) - rank(a.quality) || b.bitrate - a.bitrate)[0];
         onAudioSource(source.url);
         console.info('[Qishui] Plaintext audio issued', { quality: source.quality, preview: variant === 'preview' });
+        const clipStartMs = variant === 'preview' ? Number(player.preview?.duration?.start_ms) : 0;
         return { url: source.url, quality: source.quality, fetchedAt: Date.now(),
-            ...(Number(info.expire_at) > Date.now() / 1000 ? { expiresAt: Number(info.expire_at) * 1000 } : {}), preview: variant === 'preview' };
+            ...(Number(info.expire_at) > Date.now() / 1000 ? { expiresAt: Number(info.expire_at) * 1000 } : {}), preview: variant === 'preview',
+            ...(Number.isFinite(clipStartMs) && clipStartMs > 0 ? { clipStartMs } : {}) };
     }
     throw new QishuiError('unsupported', 'Qishui returned protected audio only; decryption is disabled');
 }

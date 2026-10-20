@@ -15,8 +15,24 @@ describe('public Qishui API', () => {
     });
     it('rejects non-protocol operations before calling the transport', async () => {
         const { api, fetch } = setup();
-        for (const operation of ['fetch', 'constructor', null, {}, 'like_song']) {
+        for (const operation of ['fetch', 'constructor', null, {}, 'create_playlist']) {
             expect(await api.request(operation as never)).toMatchObject({ ok: false, error: { code: 'unsupported' } });
+        }
+        expect(fetch).not.toHaveBeenCalled();
+    });
+    it('rejects malformed account operations before network access', async () => {
+        const { api, fetch } = setup();
+        const cases = [
+            ['like_song', { id: '1' }],
+            ['like_song', { id: 'x', liked: true }],
+            ['playlist_add_tracks', { id: '1', ids: [] }],
+            ['playlist_remove_tracks', { id: '1', ids: ['x'] }],
+            ['check_tracks', { ids: ['not-an-id'] }],
+            ['dislike_song', { id: '1', disliked: 'no' }],
+        ] as const;
+        for (const [operation, params] of cases) {
+            expect(await api.request(operation as never, params as never))
+                .toMatchObject({ ok: false, error: { code: 'invalid-response' } });
         }
         expect(fetch).not.toHaveBeenCalled();
     });
