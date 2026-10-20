@@ -23,14 +23,21 @@ const boolean = value => {
     if (typeof value !== 'boolean') throw new QishuiError('invalid-response', 'Invalid Qishui boolean');
     return value;
 };
+// A missing list is a protocol failure; an explicitly empty array is a valid empty result.
+const requiredList = (data, fields, label) => {
+    const rows = fields.map(field => data?.[field]).find(Array.isArray);
+    if (!rows) throw new QishuiError('invalid-response', `Qishui ${label} is missing`);
+    return rows;
+};
 
 // The liked playlist is a regular playlist of type 1; its id is not fixed per account.
 async function likedPlaylist(platform) {
     let cursor = '';
+    const seen = new Set();
     for (let count = 0; count < 20; count++) {
+        seen.add(cursor);
         const data = await platform('/me/playlist/', { count: PAGE_SIZE, cursor }, true);
-        const rows = Array.isArray(data.playlists) ? data.playlists
-            : Array.isArray(data.playlist_list) ? data.playlist_list : [];
+        const rows = requiredList(data, ['playlists', 'playlist_list'], 'account playlists');
         for (const row of rows) {
             const playlist = row?.playlist || row || {};
             const base = playlist.base_info || {};
@@ -38,10 +45,10 @@ async function likedPlaylist(platform) {
         }
         if (data.has_more !== true) return null;
         const next = String(data.next_cursor ?? '');
-        if (!next || next === cursor) return null;
+        if (!next || seen.has(next)) throw new QishuiError('invalid-response', 'Account playlist cursor did not advance');
         cursor = next;
     }
-    return null;
+    throw new QishuiError('invalid-response', 'Account playlist page limit reached');
 }
 
 async function likedSongs(platform) {
@@ -50,19 +57,20 @@ async function likedSongs(platform) {
     const ids = new Set();
     let cursor = '';
     let whole = false;
+    const seen = new Set();
     for (let count = 0; count < PAGE_LIMIT; count++) {
+        seen.add(cursor);
         const data = await platform('/playlist/detail/', {
             playlist_id: liked.id, owner_id: liked.ownerId, count: PAGE_SIZE, cursor, type: 1,
         });
-        const media = Array.isArray(data.media_entities) ? data.media_entities
-            : Array.isArray(data.media_list) ? data.media_list : [];
+        const media = requiredList(data, ['media_entities', 'media_list'], 'liked playlist tracks');
         for (const item of media) {
             const id = publicTrack(item).id;
             if (id) ids.add(id);
         }
         if (data.has_more !== true) { whole = true; break; }
         const next = String(data.next_cursor ?? '');
-        if (!next || next === cursor) throw new QishuiError('invalid-response', 'Liked playlist cursor did not advance');
+        if (!next || seen.has(next)) throw new QishuiError('invalid-response', 'Liked playlist cursor did not advance');
         cursor = next;
     }
     return { ids: [...ids], whole, total: ids.size };
@@ -89,8 +97,9 @@ async function recentPlayed(platform, limit, offset) {
             }
             consumed++;
         }
-        hasMore = data.has_more === true;
-        if (!hasMore || items.length >= limit) break;
+        const upstreamMore = data.has_more === true;
+        hasMore = consumed > offset + items.length || upstreamMore;
+        if (!upstreamMore || items.length >= limit) break;
         const next = String(data.next_cursor ?? '');
         if (!next || next === cursor) throw new QishuiError('invalid-response', 'Recent-played cursor did not advance');
         cursor = next;

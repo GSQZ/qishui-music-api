@@ -32,6 +32,66 @@ describe('Qishui car account reads', () => {
         const platform = vi.fn(async () => ({ playlists: [], has_more: false }));
         await expect(likedSongs(platform)).resolves.toEqual({ ids: [], whole: true, total: 0 });
     });
+    it('rejects a missing playlist list instead of reporting a complete empty account', async () => {
+        await expect(likedSongs(async () => ({ has_more: false })))
+            .rejects.toMatchObject({ code: 'invalid-response' });
+    });
+    it.each(['', 'same'])('rejects a missing or repeated discovery cursor (%s)', async next_cursor => {
+        await expect(likedSongs(async () => ({ playlists: [], has_more: true, next_cursor })))
+            .rejects.toMatchObject({ code: 'invalid-response' });
+    });
+    it('rejects cyclic playlist discovery cursors before exhausting the page limit', async () => {
+        const platform = vi.fn(async (_path: string, body: { cursor: string }) => ({
+            playlists: [], has_more: true, next_cursor: body.cursor === 'a' ? 'b' : 'a',
+        }));
+        await expect(likedSongs(platform)).rejects.toMatchObject({ code: 'invalid-response' });
+        expect(platform).toHaveBeenCalledTimes(3);
+    });
+    it('rejects unfinished discovery at the page limit instead of claiming no liked songs', async () => {
+        let count = 0;
+        const platform = vi.fn(async () => ({ playlists: [], has_more: true, next_cursor: String(++count) }));
+        await expect(likedSongs(platform)).rejects.toMatchObject({ code: 'invalid-response' });
+        expect(platform).toHaveBeenCalledTimes(20);
+    });
+    it.each([false, true])('rejects a missing track list, including after a valid page (%s)', async firstPage => {
+        let detail = 0;
+        const platform = vi.fn(async (path: string) => {
+            if (path === '/me/playlist/') return { playlists: [{ base_info: { id: '99', type: 1 } }], has_more: false };
+            if (firstPage && detail++ === 0) return { media_entities: [{ track_entity: track('1') }], has_more: true, next_cursor: 'next' };
+            return {};
+        });
+        await expect(likedSongs(platform)).rejects.toMatchObject({ code: 'invalid-response' });
+    });
+    it('keeps the documented alternative list fields working', async () => {
+        const platform = vi.fn(async (path: string) => path === '/me/playlist/'
+            ? { playlist_list: [{ base_info: { id: '99', type: 1 } }], has_more: false }
+            : { media_list: [{ track_entity: track('1') }], has_more: false });
+        await expect(likedSongs(platform)).resolves.toEqual({ ids: ['1'], whole: true, total: 1 });
+    });
+    it('keeps unread tracks on the final upstream page available to the caller', async () => {
+        const platform = vi.fn(async () => ({
+            media: ['1', '2', '3'].map(id => ({ media: { track_entity: track(id) } })), has_more: false,
+        }));
+        const first = await recentPlayed(platform, 1, 0);
+        expect(first).toMatchObject({ hasMore: true, nextOffset: 1 });
+        expect(first.items.map((song: { id: string }) => song.id)).toEqual(['1']);
+        const next = await recentPlayed(platform, 2, first.nextOffset);
+        expect(next).toMatchObject({ hasMore: false, nextOffset: 3 });
+        expect(next.items.map((song: { id: string }) => song.id)).toEqual(['2', '3']);
+    });
+    it('reads all recent tracks across upstream pages with different client page sizes', async () => {
+        const platform = vi.fn(async (_path: string, body: { cursor: string }) => ({
+            media: (body.cursor ? ['3', '4', '5'] : ['1', '2']).map(id => ({ media: { track_entity: track(id) } })),
+            has_more: !body.cursor, next_cursor: 'opaque:next',
+        }));
+        const first = await recentPlayed(platform, 2, 0);
+        const second = await recentPlayed(platform, 2, first.nextOffset);
+        const third = await recentPlayed(platform, 2, second.nextOffset);
+        expect([first.hasMore, second.hasMore, third.hasMore]).toEqual([true, true, false]);
+        expect([...first.items, ...second.items, ...third.items].map((song: { id: string }) => song.id))
+            .toEqual(['1', '2', '3', '4', '5']);
+        expect(third.nextOffset).toBe(5);
+    });
     it('pages recent tracks by offset and turns their start timestamp into milliseconds', async () => {
         const platform = vi.fn(async () => ({
             media: [

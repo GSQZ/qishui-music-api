@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 喜欢列表缺少必要字段、查找游标停滞或达到查找页数上限时返回错误，避免将未完成的读取当成完整空列表。
+- 最近播放的 `hasMore` 同时考虑当前上游页中尚未返回的歌曲，保留末页剩余条目的翻页能力。
+
 ## 0.2.0
 
 - 新增车机账号能力：`liked_songs`、`like_song`、`playlist_add_tracks`、`playlist_remove_tracks`、`recent_played`、`check_tracks`、`dislike_song`。
