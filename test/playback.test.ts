@@ -9,10 +9,11 @@ const info = (preview = false) => ({ player_info: { [preview ? 'preview' : 'full
 describe('Qishui plaintext playback', () => {
     it('uses the VOD plaintext route without returning encryption material', async () => {
         const http = vi.fn(async () => ({ data: { Result: { Data: { PlayInfoList: [{ MainPlayUrl: audio, Quality: 'medium' }] } } } }));
-        const issued = vi.fn();
-        const result = await resolveAudio({ http }, info(), 'standard', issued);
+        const log = vi.fn();
+        const result = await resolveAudio({ http, log }, info(), 'standard');
         expect(result).toMatchObject({ url: audio, quality: 'standard', preview: false });
-        expect(issued).toHaveBeenCalledWith(audio);
+        expect(log).toHaveBeenCalledWith('[Qishui] Plaintext audio issued: quality=standard preview=false');
+        expect(JSON.stringify(log.mock.calls)).not.toContain(audio);
         expect(http).toHaveBeenCalledWith(vod);
     });
     it('marks a preview resource so Folia will show its notice and avoid caching it as a song', async () => {

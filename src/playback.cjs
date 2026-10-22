@@ -4,7 +4,7 @@ const { QishuiError, mediaUrl, mediaHost } = require('./client.cjs');
 const levels = { medium: 'standard', higher: 'high', highest: 'high', lossless: 'lossless', hi_res: 'hires' };
 const rank = value => ['standard', 'high', 'lossless', 'hires'].indexOf(value);
 const encrypted = item => Boolean(item.encrypt_info?.encrypt || item.encrypt_info?.spade_a || item.PlayAuth || Number(item.Encrypt || 0));
-async function resolveAudio(client, track, requested, onAudioSource = () => {}) {
+async function resolveAudio(client, track, requested) {
     const player = track.player_info;
     if (!player) throw new QishuiError('not-playable', 'Qishui returned no player information');
     // One unknown CDN must not fail a song another candidate can play; refused URLs are never returned.
@@ -54,8 +54,7 @@ async function resolveAudio(client, track, requested, onAudioSource = () => {}) 
         report();
         const allowed = candidates.filter(item => rank(item.quality) <= rank(requested));
         const source = (allowed.length ? allowed : candidates).sort((a, b) => rank(b.quality) - rank(a.quality) || b.bitrate - a.bitrate)[0];
-        onAudioSource(source.url);
-        console.info('[Qishui] Plaintext audio issued', { quality: source.quality, preview: variant === 'preview' });
+        (client.log || console.info)(`[Qishui] Plaintext audio issued: quality=${source.quality} preview=${variant === 'preview'}`);
         const clipStartMs = variant === 'preview' ? Number(player.preview?.duration?.start_ms) : 0;
         return { url: source.url, quality: source.quality, fetchedAt: Date.now(),
             ...(Number(info.expire_at) > Date.now() / 1000 ? { expiresAt: Number(info.expire_at) * 1000 } : {}), preview: variant === 'preview',

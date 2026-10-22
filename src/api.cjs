@@ -22,9 +22,10 @@ function createQishuiApi(options) {
         throw new TypeError('A valid device ID and session repository are required');
     }
     // Hosts that inject only `log` receive warnings there too; messages never carry URLs or credentials.
+    const log = typeof options.log === 'function' ? options.log : console.info;
     const warn = typeof options.warn === 'function' ? options.warn : typeof options.log === 'function' ? options.log : console.warn;
-    const client = createClient({ sessions, fetch: options.fetch, warn });
-    const auth = createAuth(client, options);
+    const client = createClient({ sessions, fetch: options.fetch, log, warn });
+    const auth = createAuth(client, { log });
     const catalog = createCatalog(client);
     const feed = createFeed(client);
     const library = createLibrary(client);
@@ -91,7 +92,9 @@ function createQishuiApi(options) {
                 return { ok: true, data };
             } catch (error) {
                 // Only safe protocol errors cross IPC. Fetch exceptions may embed credential-bearing URLs.
-                if (error instanceof QishuiError && typeof operation === 'string' && operation.startsWith('login')) console.warn('[Qishui] Sign-in operation failed', error);
+                if (error instanceof QishuiError && typeof operation === 'string' && operation.startsWith('login')) {
+                    warn(`[Qishui] Sign-in operation failed: ${[error.code, error.stage, error.upstreamCode].filter(Boolean).join(' ')}`);
+                }
                 if (error instanceof QishuiError) return { ok: false, error: { code: error.code, message: error.message, upstreamCode: error.upstreamCode, stage: error.stage } };
                 return { ok: false, error: { code: 'invalid-response', message: 'Qishui operation failed' } };
             }

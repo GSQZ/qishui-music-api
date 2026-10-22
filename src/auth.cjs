@@ -19,7 +19,7 @@ function createAuth(client, { log = console.info } = {}) {
     const step = async (stage, run) => {
         try { return await run(); }
         catch (error) {
-            const failure = error instanceof QishuiError ? error : new QishuiError('invalid-response', 'Qishui sign-in response could not be read');
+            const failure = error instanceof QishuiError ? error : new QishuiError('invalid-response', 'Qishui sign-in response could not be read', undefined, { cause: error });
             failure.stage ||= stage;
             throw failure;
         }

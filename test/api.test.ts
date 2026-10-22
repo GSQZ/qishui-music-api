@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createRequire } from 'node:module';
 import { createQishuiApi, createQishuiDeviceId, isQishuiDeviceId, QISHUI_OPERATIONS } from '../index.cjs';
+
+const { createClient } = createRequire(import.meta.url)('../src/client.cjs');
 
 // Exercise the public API contract independently of any host bridge.
 const setup = (fetch = vi.fn()) => {
@@ -63,5 +66,23 @@ describe('public Qishui API', () => {
         const result = await api.request('search', { query: 'song' });
         expect(result).toEqual({ ok: false, error: { code: 'network', message: 'Qishui service could not be reached' } });
         expect(JSON.stringify(result)).not.toContain('fixture-private');
+    });
+    it('keeps the transport failure as the cause inside the main process only', async () => {
+        const failure = new Error('https://private.test/?token=fixture-private');
+        const client = createClient({ sessions: { deviceId: createQishuiDeviceId(), revision: 0, get: () => null }, fetch: vi.fn().mockRejectedValue(failure) });
+        await expect(client.http('https://open.qishui.com/')).rejects.toMatchObject({ code: 'network', cause: failure });
+        const parse = createClient({ sessions: { deviceId: createQishuiDeviceId(), revision: 0, get: () => null }, fetch: vi.fn(async () => new Response('not json')) });
+        const error = await parse.http('https://open.qishui.com/').catch((reason: any) => reason);
+        expect(error).toMatchObject({ code: 'invalid-response' });
+        expect(error.cause).toBeInstanceOf(SyntaxError);
+    });
+    it('logs sign-in failures as plain text without the error object or its cause', async () => {
+        const deviceId = createQishuiDeviceId();
+        const sessions = { deviceId, revision: 0, get: () => null, set: vi.fn(), clear: vi.fn() };
+        const warn = vi.fn();
+        const api = createQishuiApi({ deviceId, sessions, warn, fetch: vi.fn().mockRejectedValue(new Error('https://private.test/?token=fixture-private')) });
+        expect(await api.request('login_qr_key')).toEqual({ ok: false, error: { code: 'network', message: 'Qishui service could not be reached' } });
+        expect(warn).toHaveBeenCalledWith('[Qishui] Sign-in operation failed: network');
+        expect(warn.mock.calls.flat().every(value => typeof value === 'string')).toBe(true);
     });
 });
