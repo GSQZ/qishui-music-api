@@ -32,6 +32,8 @@ describe('public Qishui API', () => {
             ['playlist_remove_tracks', { id: '1', ids: ['x'] }],
             ['check_tracks', { ids: ['not-an-id'] }],
             ['dislike_song', { id: '1', disliked: 'no' }],
+            ['feed', { preference: { mode: 'familiar' } }],
+            ['feed', { preference: 'familiar', scene: '33' }],
         ] as const;
         for (const [operation, params] of cases) {
             expect(await api.request(operation as never, params as never))

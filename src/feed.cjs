@@ -25,6 +25,8 @@ function createFeed({ platform }) {
             const run = async () => {
                 if (mine !== generation) throw new QishuiError('unavailable', 'Qishui account changed');
                 const { scene, preference, queue = 'fm', first = false, count = 20 } = options;
+                // preference_mode is a short mode name such as `familiar` or `fresh`, never an object or free text.
+                if (preference != null && (typeof preference !== 'string' || !/^[a-z][a-z_]{0,31}$/.test(preference))) throw new QishuiError('invalid-response', 'Invalid preference');
                 if (scene != null && preference) throw new QishuiError('invalid-response', 'Scene and preference are mutually exclusive');
                 if (scene != null && (!/^\d+$/.test(String(scene)) || !Number.isSafeInteger(Number(scene)))) throw new QishuiError('invalid-response', 'Invalid scene');
                 const key = `${queue}:${scene ?? preference ?? 'default'}`;

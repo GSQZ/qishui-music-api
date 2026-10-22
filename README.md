@@ -27,7 +27,7 @@ const api = createQishuiApi({ deviceId, sessions, fetch: globalThis.fetch });
 const result = await api.request('search', { query: '晴天', limit: 20, offset: 0 });
 ```
 
-`request` 返回 `{ ok: true, data }` 或 `{ ok: false, error: { code, message, upstreamCode?, stage? } }`。操作名由只读的 `QISHUI_OPERATIONS` 导出；TypeScript 类型与入口一起发布。设备 ID 必须由 `createQishuiDeviceId()` 生成，恢复时用 `isQishuiDeviceId()` 校验。
+`request` 返回 `{ ok: true, data }` 或 `{ ok: false, error: { code, message, upstreamCode?, stage? } }`。操作名由只读的 `QISHUI_OPERATIONS` 导出；TypeScript 类型与入口一起发布。设备 ID 必须由 `createQishuiDeviceId()` 生成，恢复时用 `isQishuiDeviceId()` 校验。推荐流 `feed` 接受 `scene`（`feed_modes` 返回的场景 ID）或 `preference`（小写的偏好模式名，如 `familiar`、`fresh`），两者互斥，格式不对时在请求前返回 `invalid-response`。
 
 账号读取与写入操作：`liked_songs`、`like_song`（`{ id, liked }`）、`playlist_add_tracks` / `playlist_remove_tracks`（`{ id, ids }`，单次最多 100 首）、`recent_played`、`check_tracks`（`{ ids }`）、`dislike_song`（`{ id, disliked }`）。写操作与账号读取需要已登录会话；车机接口没有专辑详情、新建歌单、收藏歌单/专辑的端点，这些操作不提供。
 

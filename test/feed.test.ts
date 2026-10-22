@@ -24,6 +24,17 @@ describe('car stream request state', () => {
             await expect(modes(broken)).rejects.toMatchObject({ code: 'invalid-response' });
         }
     });
+    it('passes a preference mode name and rejects malformed preferences before any request', async () => {
+        const platform = vi.fn(async () => ({ items: [], has_more: true }));
+        const feed = createFeed({ platform });
+        await feed.songs({ preference: 'familiar' });
+        expect((platform.mock.calls[0] as any[])[1].feed_preference).toMatchObject({ preference_mode: 'familiar', scene_mode_id: null });
+        for (const preference of [{}, ['fresh'], 1, true, '', 'Fresh', 'fresh mode', 'x'.repeat(40)]) {
+            await expect(feed.songs({ preference })).rejects.toMatchObject({ code: 'invalid-response' });
+        }
+        await expect(feed.songs({ scene: '33', preference: 'fresh' })).rejects.toMatchObject({ code: 'invalid-response' });
+        expect(platform).toHaveBeenCalledTimes(1);
+    });
     it('drops an in-flight account stream if the listener signs out', async () => {
         let release!: (value: unknown) => void;
         const platform = vi.fn(() => new Promise(resolve => { release = resolve; }));

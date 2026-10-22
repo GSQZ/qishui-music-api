@@ -9,6 +9,7 @@
 - `login_status` 续期时账号凭据被平台明确拒绝（access code 刷新、ticket 交换、`/me/info/` 返回鉴权错误码，或账号身份变化）会调用 `sessions.clear()` 并重置推荐流，不再每次带着已吊销的凭据续期；公共读取的客户端令牌过期、无平台错误码的 HTTP 401/403、网络错误不会清除账号。
 - 找不到喜欢歌单时 `liked_songs` 返回 `invalid-response`，不再交回 `{ ids: [], whole: true }`，避免宿主把它当成完整的空列表清掉已同步的喜欢；喜欢歌单本身为空时仍返回完整的空列表。
 - `recent_played` 答复缺少列表却声称还有下一页时返回错误，不再沿游标空翻；`feed_modes` 缺少 `feed_mode_block` 时返回错误，显式的空数组仍是空目录。
+- `feed` 校验 `preference`：只接受小写字母和下划线组成的模式名（如 `familiar`、`fresh`），对象、数组、数字或空串在请求前返回 `invalid-response`。
 
 ## 0.2.1
 
