@@ -67,6 +67,51 @@ describe('playlist page resume points', () => {
         expect(ids).toEqual(Array.from({ length: 3000 }, (_, i) => String(i + 1)));
         expect(platform).toHaveBeenCalledTimes(30);
     });
+    it.each(['0', 'A', 'B'])('rejects a resumed cursor cycle back to %s even when the requested page is full', async next => {
+        const platform = vi.fn(async (_path: string, body: { cursor: string }) => {
+            const start = body.cursor === '0' ? 0 : body.cursor === 'A' ? 2 : 4;
+            return { media_entities: [1, 2].map(i => ({ track_entity: track(String(start + i)) })),
+                has_more: true, next_cursor: body.cursor === '0' ? 'A' : body.cursor === 'A' ? 'B' : next };
+        });
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        for (const offset of [0, 2]) {
+            const page = await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 2, offset });
+            expect(page.items.map((item: { id: string }) => item.id)).toEqual([String(offset + 1), String(offset + 2)]);
+        }
+        await expect(catalog.playlist_tracks({ id: '99', ownerId: '', limit: 2, offset: 4 }))
+            .rejects.toMatchObject({ code: 'invalid-response', message: 'Playlist cursor did not advance' });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'A', 'B']);
+        // A rejected walk invalidates its resume points before the caller retries.
+        platform.mockClear();
+        await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 2, offset: 2 });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'A']);
+    });
+    it('does not treat later cached resume points as ancestors when rereading earlier pages', async () => {
+        const platform = upstream();
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        for (const offset of [0, 100, 200]) await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 100, offset });
+        platform.mockClear();
+        for (const offset of [0, 100]) {
+            const page = await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 100, offset });
+            expect(page.items.map((item: { id: string }) => item.id))
+                .toEqual(Array.from({ length: 100 }, (_, i) => String(offset + i + 1)));
+        }
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'opaque:100']);
+    });
+    it('does not charge already visited ancestors against the current walk page limit', async () => {
+        const platform = vi.fn(async (_path: string, body: { cursor: string }) => {
+            const index = body.cursor === '0' ? 0 : Number(body.cursor.slice('opaque:'.length));
+            return { media_entities: [{ track_entity: track(String(index + 1)) }],
+                has_more: index < 500, next_cursor: `opaque:${index + 1}` };
+        });
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 1, offset: 499 });
+        expect(platform).toHaveBeenCalledTimes(500);
+        platform.mockClear();
+        const page = await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 1, offset: 500 });
+        expect(page).toMatchObject({ items: [{ id: '501' }], hasMore: false, nextOffset: 501 });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['opaque:500']);
+    });
     it('resumes inside an upstream page and keeps the first page collection', async () => {
         const platform = upstream();
         const catalog = createCatalog({ platform, sessions: sessions() });

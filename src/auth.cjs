@@ -9,7 +9,7 @@ const qrParams = () => ({ aid: '1128', client_key: CLIENT_KEY,
     state: '', next: '', jump_type: 'native', optional_scope_check: '', optional_scope_uncheck: '',
     customize_params: '{"source":"pc_auth","not_skip_confirm":"true"}', source_from: 'native', device_platform: 'android',
     app_identity: crypto.createHash('md5').update('com.luna.music.car').digest('hex'), signature: 'cf9024ea72d9c71813238b13ea107a3d' });
-function createAuth(client, { log = console.info } = {}) {
+function createAuth(client, { log = console.info, onSignOut = () => {} } = {}) {
     const pending = new Map();
     let generation = 0;
     let refreshing;
@@ -48,6 +48,8 @@ function createAuth(client, { log = console.info } = {}) {
         const signOut = () => {
             if (revision !== sessions.revision) return;
             sessions.clear();
+            // Notify only for this renewal's actual sign-out, not a stale failure after logout.
+            onSignOut();
             log('[Qishui] Stored account was rejected; signed out');
         };
         try {

@@ -25,9 +25,9 @@ function createQishuiApi(options) {
     const log = typeof options.log === 'function' ? options.log : console.info;
     const warn = typeof options.warn === 'function' ? options.warn : typeof options.log === 'function' ? options.log : console.warn;
     const client = createClient({ sessions, fetch: options.fetch, log, warn });
-    const auth = createAuth(client, { log });
     const catalog = createCatalog(client);
     const feed = createFeed(client);
+    const auth = createAuth(client, { log, onSignOut: () => feed.clear() });
     const library = createLibrary(client);
     const nowUser = () => sessions.get()?.userId || null;
     return {
@@ -58,10 +58,7 @@ function createQishuiApi(options) {
                         if (data.state === 'confirmed') feed.clear();
                         break;
                     case 'login_qr_cancel': auth.cancel(raw.key); data = null; break;
-                    case 'login_status':
-                        // A rejected stored account is signed out by auth; its feed queues go with it.
-                        data = await auth.status().catch(error => { if (!sessions.get()) feed.clear(); throw error; });
-                        break;
+                    case 'login_status': data = await auth.status(); break;
                     case 'logout': auth.logout(); feed.clear(); data = null; break;
                     case 'song_detail': data = publicTrack(await catalog.track(p.id)); break;
                     case 'lyrics': data = (await catalog.track(p.id)).display_info?.lyric_info || {}; break;

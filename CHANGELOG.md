@@ -1,7 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.2.2
 
+- 修复歌单游标缓存跨次读取时遗漏循环检测的问题，保留续读点之前的游标链，遇到重复游标及时报错。
+- 修复旧 `login_status` 在注销后失败时误清新游客推荐流的问题；只有本次续期确实清除了原账号才重置推荐流。
 - 媒体主机白名单加入 `zjcdn.com`（车机 `/media/mget/` 与 VOD 播放信息实测返回 `v3-dy-o.zjcdn.com`）。
 - 不可信主机的候选地址（含 `url_player_info`）改为跳过，只有某个版本的未加密候选全部不可信时才返回 `invalid-response`，不会因此退回试听片段；被拒的主机名通过 `warn`（未注入时用 `log`）记录，不记路径和查询串。新增可选的 `warn` 注入。
 - 播放与扫码失败日志改走注入的 `log` / `warn`，只写纯文本，不再把错误对象交给 `console`；删去 `resolveAudio` 未使用的 `onAudioSource` 参数。

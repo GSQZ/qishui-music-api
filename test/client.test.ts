@@ -335,6 +335,40 @@ describe('stored account rejection during renewal', () => {
             .toMatchObject({ ok: false, error: { code: 'auth-required', upstreamCode: '28001008' } });
         expect(setup.sessions.clear).not.toHaveBeenCalled();
     });
+    it.each([
+        ['an account rejection', () => Response.json({ err_no: 28001007 })],
+        ['a network failure', () => { throw new Error('fixture transport failure'); }],
+        ['a parse failure', () => new Response('not json')],
+    ])('keeps a new guest stream when a pre-logout renewal ends with %s', async (_label, answer) => {
+        const accountStarted = deferred<void>();
+        const accountRelease = deferred<void>();
+        const feedStarted = deferred<void>();
+        const feedRelease = deferred<Response>();
+        const bodies: any[] = [];
+        const setup = harness({ sessions: repository(stored()), request: async (url, { body }) => {
+            if (url.includes('/me/info/')) {
+                accountStarted.resolve();
+                await accountRelease.promise;
+                return answer();
+            }
+            bodies.push(JSON.parse(body));
+            if (bodies.length === 1) { feedStarted.resolve(); return feedRelease.promise; }
+            return success();
+        } });
+        const renewal = setup.api.request('login_status');
+        await accountStarted.promise;
+        expect(await setup.api.request('logout')).toEqual({ ok: true, data: null });
+        const guest = setup.api.request('feed');
+        await feedStarted.promise;
+        accountRelease.resolve();
+        expect((await renewal).ok).toBe(false);
+        feedRelease.resolve(success());
+        expect(await guest).toMatchObject({ ok: true });
+        expect(await setup.api.request('feed')).toMatchObject({ ok: true });
+        expect(bodies.map(body => body.is_first_request)).toEqual([true, false]);
+        expect(bodies.map(body => body.common_params)).toEqual([{}, {}]);
+        expect(setup.sessions.clear).toHaveBeenCalledTimes(1);
+    });
     it('restarts the recommendation stream after a rejected account is signed out', async () => {
         let rejecting = false;
         const bodies: any[] = [];

@@ -38,16 +38,22 @@ async function search(platform, query, type, limit, offset) {
 // Playlist cursors are not row numbers, so an offset is reached by walking from the beginning.
 // `marks` (optional) remembers the cursor found after each row count so the next page can resume there.
 async function playlistPage(platform, id, ownerId, limit, offset, marks) {
-    let cursor = '0';
+    let lineage = { cursor: '0' };
     let consumed = 0;
     for (const [position, mark] of marks?.positions || []) {
-        if (position <= offset && position > consumed) { consumed = position; cursor = mark; }
+        if (position <= offset && position > consumed) { consumed = position; lineage = mark; }
     }
+    let cursor = lineage.cursor;
+    // Resume with this cursor's ancestors, not unrelated later marks. Linked nodes share
+    // history between pages without retaining a copy of the whole visited set per mark.
     const seen = new Set();
+    for (let ancestor = lineage; ancestor; ancestor = ancestor.previous) seen.add(ancestor.cursor);
     const items = [];
     let collection = consumed ? marks.collection : undefined;
     let hasMore = false;
-    while (items.length < limit && seen.size < 500) {
+    let pages = 0;
+    while (items.length < limit && pages < 500) {
+        pages++;
         seen.add(cursor);
         const data = await platform('/playlist/detail/', { playlist_id: id, owner_id: ownerId || '', count: 100, cursor, type: null });
         collection ||= data.playlist;
@@ -61,12 +67,18 @@ async function playlistPage(platform, id, ownerId, limit, offset, marks) {
         const upstreamMore = data.has_more === true;
         const unused = consumed > offset + items.length;
         hasMore = unused || upstreamMore;
-        if (marks && upstreamMore && batch.length && next && !seen.has(next)) marks.positions.set(consumed, next);
+        // Reject cycles before caching or returning a full page; otherwise cached cursors
+        // could silently repeat pages across calls.
+        if (upstreamMore && seen.has(next)) throw new QishuiError('invalid-response', 'Playlist cursor did not advance');
+        if (marks && upstreamMore && batch.length && next) {
+            lineage = { cursor: next, previous: lineage };
+            marks.positions.set(consumed, lineage);
+        }
         if (!upstreamMore || items.length === limit) break;
         if (!batch.length || !next || seen.has(next)) throw new QishuiError('invalid-response', 'Playlist cursor did not advance');
         cursor = next;
     }
-    if (seen.size >= 500 && items.length < limit && hasMore) throw new QishuiError('invalid-response', 'Playlist page limit reached');
+    if (pages >= 500 && items.length < limit && hasMore) throw new QishuiError('invalid-response', 'Playlist page limit reached');
     return { items, collection, hasMore: hasMore && items.length > 0, nextOffset: offset + items.length };
 }
 // Short-lived, per-account resume points for sequential playlist pages. Entries expire, are capped,
