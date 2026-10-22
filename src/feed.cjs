@@ -12,7 +12,9 @@ function createFeed({ platform }) {
         clear() { generation++; queues.clear(); activeKeys.clear(); total = 0; },
         async modes() {
             const data = await platform('/feed/mode/');
-            return (data.feed_mode_block || []).flatMap(block => (block.feed_mode || []).flatMap(item => {
+            // An explicitly empty catalogue is valid; a missing one is a protocol failure the host can retry.
+            if (!Array.isArray(data.feed_mode_block)) throw new QishuiError('invalid-response', 'Qishui feed modes are missing');
+            return data.feed_mode_block.flatMap(block => (block.feed_mode || []).flatMap(item => {
                 const mode = item.entity?.feed_mode;
                 const id = mode?.scene_mode?.scene_mode_id;
                 return id == null ? [] : [{ id: String(id), name: String(mode.text || ''), group: String(block.title || ''), coverUrl: mode.url_info }];
