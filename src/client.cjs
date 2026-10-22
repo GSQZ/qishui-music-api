@@ -2,7 +2,8 @@ const { QISHUI_PREFIX: PREFIX, QISHUI_UA: UA, qishuiParams, qishuiGuardHeaders }
 
 // Car HTTP client: public media and ticket-guard account requests use separate authentication.
 class QishuiError extends Error {
-    constructor(code, message, upstreamCode) { super(message); this.code = code; this.upstreamCode = upstreamCode; }
+    // `cause` stays in the main process for debugging; the API result copies only code, message, upstreamCode and stage.
+    constructor(code, message, upstreamCode, options) { super(message, options); this.code = code; this.upstreamCode = upstreamCode; }
 }
 const AUTH_CODES = [28001003, 28001007, 28001008, 10007];
 // Only known reads may be replayed. Account commands and future platform endpoints
@@ -17,7 +18,7 @@ function checked(data) {
 }
 const HOSTS = ['365yg.com', 'douyinvod.com', 'douyinscdn.com', 'bytefcdn.com', 'bytecdn.cn', 'byteicdn.com', 'ibytedtos.com',
     'pstatp.com', 'snssdk.com', 'bytedance.com', 'bytetos.com', 'volcvideo.com', 'volccdn.com', 'volces.com',
-    'volcengineapi.com', 'douyin.com', 'qishui.com', 'zijieapi.com'];
+    'volcengineapi.com', 'douyin.com', 'qishui.com', 'zijieapi.com', 'zjcdn.com'];
 function mediaUrl(raw) {
     let url;
     try { url = new URL(raw); } catch { throw new QishuiError('invalid-response', 'Invalid Qishui media URL'); }
@@ -27,7 +28,11 @@ function mediaUrl(raw) {
     }
     return url.href;
 }
-function createClient({ sessions, fetch: fetcher = globalThis.fetch }) {
+// Names only the host of a refused media URL; its path and query may carry signatures.
+function mediaHost(raw) {
+    try { return new URL(raw).hostname || 'unknown host'; } catch { return 'invalid URL'; }
+}
+function createClient({ sessions, fetch: fetcher = globalThis.fetch, log = console.info, warn = console.warn }) {
     let tokenEntry;
     async function http(url, { body, headers = {}, form = false } = {}) {
         let response;
@@ -36,10 +41,10 @@ function createClient({ sessions, fetch: fetcher = globalThis.fetch }) {
                 headers: { 'user-agent': UA, ...(body === undefined ? {} : { 'content-type': form ? 'application/x-www-form-urlencoded' : 'application/json' }), ...headers },
                 ...(body === undefined ? {} : { body: form ? new URLSearchParams(body).toString() : JSON.stringify(body) }),
                 redirect: 'error', signal: AbortSignal.timeout(25000) });
-        } catch { throw new QishuiError('network', 'Qishui service could not be reached'); }
+        } catch (cause) { throw new QishuiError('network', 'Qishui service could not be reached', undefined, { cause }); }
         if (!response.ok) throw new QishuiError(response.status === 429 ? 'unavailable' : [401, 403].includes(response.status) ? 'auth-required' : 'network', `Qishui HTTP ${response.status}`);
         try { return { data: checked(await response.json()), headers: response.headers }; }
-        catch (error) { if (error instanceof QishuiError) throw error; throw new QishuiError('invalid-response', 'Qishui response is not JSON'); }
+        catch (error) { if (error instanceof QishuiError) throw error; throw new QishuiError('invalid-response', 'Qishui response is not JSON', undefined, { cause: error }); }
     }
     const query = (path, extras = {}, deviceId = sessions.deviceId) => {
         const values = new URLSearchParams(qishuiParams(deviceId));
@@ -100,6 +105,6 @@ function createClient({ sessions, fetch: fetcher = globalThis.fetch }) {
         });
         return data.data && typeof data.data === 'object' ? data.data : {};
     }
-    return { http, query, platform, command, sessions };
+    return { http, query, platform, command, sessions, log, warn };
 }
-module.exports = { createClient, QishuiError, mediaUrl };
+module.exports = { createClient, QishuiError, mediaUrl, mediaHost };

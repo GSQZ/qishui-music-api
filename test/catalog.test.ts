@@ -42,3 +42,133 @@ describe('Qishui car catalogue', () => {
         expect(publicTrack({ ...track(), player_info: { full: { secret: 'excluded' } } })).not.toHaveProperty('player_info');
     });
 });
+describe('playlist page resume points', () => {
+    // 3000 rows in upstream pages of 100 behind opaque cursors.
+    const upstream = (total = 3000) => vi.fn(async (_path: string, body: { cursor: string }) => {
+        const start = body.cursor === '0' ? 0 : Number(body.cursor.slice('opaque:'.length));
+        const end = Math.min(start + 100, total);
+        return { ...(start === 0 ? { playlist: { base_info: { id: '99', title: 'Long' } } } : {}),
+            media_entities: Array.from({ length: end - start }, (_, i) => ({ track_entity: track(String(start + i + 1)) })),
+            has_more: end < total, next_cursor: `opaque:${end}` };
+    });
+    const sessions = (userId = 'fixture-user') => ({ current: { userId } as { userId: string } | null, get() { return this.current; } });
+    const readAll = async (catalog: any, ownerId = '') => {
+        const ids: string[] = [];
+        for (let offset = 0, more = true; more;) {
+            const page = await catalog.playlist_tracks({ id: '99', ownerId, limit: 100, offset });
+            ids.push(...page.items.map((t: { id: string }) => t.id));
+            more = page.hasMore; offset = page.nextOffset;
+        }
+        return ids;
+    };
+    it('reads sequential pages of a long playlist in one upstream request each', async () => {
+        const platform = upstream();
+        const ids = await readAll(createCatalog({ platform, sessions: sessions() }));
+        expect(ids).toEqual(Array.from({ length: 3000 }, (_, i) => String(i + 1)));
+        expect(platform).toHaveBeenCalledTimes(30);
+    });
+    it.each(['0', 'A', 'B'])('rejects a resumed cursor cycle back to %s even when the requested page is full', async next => {
+        const platform = vi.fn(async (_path: string, body: { cursor: string }) => {
+            const start = body.cursor === '0' ? 0 : body.cursor === 'A' ? 2 : 4;
+            return { media_entities: [1, 2].map(i => ({ track_entity: track(String(start + i)) })),
+                has_more: true, next_cursor: body.cursor === '0' ? 'A' : body.cursor === 'A' ? 'B' : next };
+        });
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        for (const offset of [0, 2]) {
+            const page = await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 2, offset });
+            expect(page.items.map((item: { id: string }) => item.id)).toEqual([String(offset + 1), String(offset + 2)]);
+        }
+        await expect(catalog.playlist_tracks({ id: '99', ownerId: '', limit: 2, offset: 4 }))
+            .rejects.toMatchObject({ code: 'invalid-response', message: 'Playlist cursor did not advance' });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'A', 'B']);
+        // A rejected walk invalidates its resume points before the caller retries.
+        platform.mockClear();
+        await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 2, offset: 2 });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'A']);
+    });
+    it('does not treat later cached resume points as ancestors when rereading earlier pages', async () => {
+        const platform = upstream();
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        for (const offset of [0, 100, 200]) await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 100, offset });
+        platform.mockClear();
+        for (const offset of [0, 100]) {
+            const page = await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 100, offset });
+            expect(page.items.map((item: { id: string }) => item.id))
+                .toEqual(Array.from({ length: 100 }, (_, i) => String(offset + i + 1)));
+        }
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'opaque:100']);
+    });
+    it('does not charge already visited ancestors against the current walk page limit', async () => {
+        const platform = vi.fn(async (_path: string, body: { cursor: string }) => {
+            const index = body.cursor === '0' ? 0 : Number(body.cursor.slice('opaque:'.length));
+            return { media_entities: [{ track_entity: track(String(index + 1)) }],
+                has_more: index < 500, next_cursor: `opaque:${index + 1}` };
+        });
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 1, offset: 499 });
+        expect(platform).toHaveBeenCalledTimes(500);
+        platform.mockClear();
+        const page = await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 1, offset: 500 });
+        expect(page).toMatchObject({ items: [{ id: '501' }], hasMore: false, nextOffset: 501 });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['opaque:500']);
+    });
+    it('resumes inside an upstream page and keeps the first page collection', async () => {
+        const platform = upstream();
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 30, offset: 0 });
+        await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 100, offset: 30 });
+        platform.mockClear();
+        const page = await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 30, offset: 150 });
+        expect(page.items.map((t: { id: string }) => t.id)).toEqual(Array.from({ length: 30 }, (_, i) => String(151 + i)));
+        expect(page.collection).toMatchObject({ base_info: { title: 'Long' } });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['opaque:100']);
+    });
+    it('keeps owners apart and starts over after an account switch', async () => {
+        const platform = upstream();
+        const accounts = sessions();
+        const catalog = createCatalog({ platform, sessions: accounts });
+        await catalog.playlist_tracks({ id: '99', ownerId: 'a', limit: 100, offset: 0 });
+        platform.mockClear();
+        await catalog.playlist_tracks({ id: '99', ownerId: 'b', limit: 100, offset: 100 });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'opaque:100']);
+        platform.mockClear();
+        accounts.current = { userId: 'another-user' };
+        await catalog.playlist_tracks({ id: '99', ownerId: 'b', limit: 100, offset: 200 });
+        expect(platform.mock.calls[0][1].cursor).toBe('0');
+        platform.mockClear();
+        accounts.current = null;
+        await catalog.playlist_tracks({ id: '99', ownerId: 'b', limit: 100, offset: 200 });
+        expect(platform.mock.calls[0][1].cursor).toBe('0');
+    });
+    it('forgets resume points after they expire, after a failed walk and on request', async () => {
+        let time = 0;
+        const platform = upstream();
+        const catalog = createCatalog({ platform, sessions: sessions() }, { now: () => time });
+        const firstCursor = async (offset: number) => {
+            platform.mockClear();
+            await catalog.playlist_tracks({ id: '99', ownerId: '', limit: 100, offset });
+            return platform.mock.calls[0][1].cursor;
+        };
+        await firstCursor(0);
+        expect(await firstCursor(100)).toBe('opaque:100');
+        time += 5 * 60 * 1000 + 1;
+        expect(await firstCursor(200)).toBe('0');
+        expect(await firstCursor(300)).toBe('opaque:300');
+        platform.mockRejectedValueOnce(Object.assign(new Error('fixture'), { code: 'unavailable' }));
+        await expect(catalog.playlist_tracks({ id: '99', ownerId: '', limit: 100, offset: 400 })).rejects.toThrow();
+        expect(await firstCursor(400)).toBe('0');
+        catalog.forgetPlaylist('99');
+        expect(await firstCursor(500)).toBe('0');
+        catalog.forgetPlaylist();
+        expect(await firstCursor(600)).toBe('0');
+    });
+    it('caps how many playlists keep resume points', async () => {
+        const platform = upstream(300);
+        const catalog = createCatalog({ platform, sessions: sessions() });
+        for (let id = 1; id <= 33; id++) await catalog.playlist_tracks({ id: String(id), ownerId: '', limit: 100, offset: 0 });
+        platform.mockClear();
+        await catalog.playlist_tracks({ id: '1', ownerId: '', limit: 100, offset: 100 });
+        await catalog.playlist_tracks({ id: '33', ownerId: '', limit: 100, offset: 100 });
+        expect(platform.mock.calls.map(call => call[1].cursor)).toEqual(['0', 'opaque:100', 'opaque:100']);
+    });
+});

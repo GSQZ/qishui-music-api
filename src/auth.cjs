@@ -9,7 +9,7 @@ const qrParams = () => ({ aid: '1128', client_key: CLIENT_KEY,
     state: '', next: '', jump_type: 'native', optional_scope_check: '', optional_scope_uncheck: '',
     customize_params: '{"source":"pc_auth","not_skip_confirm":"true"}', source_from: 'native', device_platform: 'android',
     app_identity: crypto.createHash('md5').update('com.luna.music.car').digest('hex'), signature: 'cf9024ea72d9c71813238b13ea107a3d' });
-function createAuth(client, { log = console.info } = {}) {
+function createAuth(client, { log = console.info, onSignOut = () => {} } = {}) {
     const pending = new Map();
     let generation = 0;
     let refreshing;
@@ -19,7 +19,7 @@ function createAuth(client, { log = console.info } = {}) {
     const step = async (stage, run) => {
         try { return await run(); }
         catch (error) {
-            const failure = error instanceof QishuiError ? error : new QishuiError('invalid-response', 'Qishui sign-in response could not be read');
+            const failure = error instanceof QishuiError ? error : new QishuiError('invalid-response', 'Qishui sign-in response could not be read', undefined, { cause: error });
             failure.stage ||= stage;
             throw failure;
         }
@@ -43,17 +43,32 @@ function createAuth(client, { log = console.info } = {}) {
         const old = sessions.get();
         if (!old) return null;
         const revision = sessions.revision;
-        let candidate = old;
-        if (old.expiresAt < Date.now() + 3600000) {
-            const result = await http(query(`https://open.qishui.com${PREFIX}/access/code/refresh/`, { access_code: old.accessCode }, old.deviceId));
-            const access = result.data.data || result.data;
-            candidate = await ticket({ ...access, open_id: access.open_id || access.open_uid || old.openId }, old, old.deviceId);
+        // Every request here carries this account's own credentials, never the public client token,
+        // so an explicit platform rejection means the stored session cannot be renewed.
+        const signOut = () => {
+            if (revision !== sessions.revision) return;
+            sessions.clear();
+            // Notify only for this renewal's actual sign-out, not a stale failure after logout.
+            onSignOut();
+            log('[Qishui] Stored account was rejected; signed out');
+        };
+        try {
+            let candidate = old;
+            if (old.expiresAt < Date.now() + 3600000) {
+                const result = await http(query(`https://open.qishui.com${PREFIX}/access/code/refresh/`, { access_code: old.accessCode }, old.deviceId));
+                const access = result.data.data || result.data;
+                candidate = await ticket({ ...access, open_id: access.open_id || access.open_uid || old.openId }, old, old.deviceId);
+            }
+            const user = await getUser(candidate);
+            if (user.id !== old.userId) { signOut(); throw new QishuiError('auth-required', 'Qishui account identity changed'); }
+            if (revision !== sessions.revision) return null;
+            sessions.set({ ...candidate, userId: user.id, user });
+            return user;
+        } catch (error) {
+            // HTTP 401/403 without a platform code, network and parse failures keep the session for a later retry.
+            if (error instanceof QishuiError && error.code === 'auth-required' && error.upstreamCode) signOut();
+            throw error;
         }
-        const user = await getUser(candidate);
-        if (user.id !== old.userId) throw new QishuiError('auth-required', 'Qishui account identity changed');
-        if (revision !== sessions.revision) return null;
-        sessions.set({ ...candidate, userId: user.id, user });
-        return user;
     }
     return {
         async start() {

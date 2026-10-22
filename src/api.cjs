@@ -21,10 +21,13 @@ function createQishuiApi(options) {
         || !['get', 'set', 'clear'].every(method => typeof sessions[method] === 'function')) {
         throw new TypeError('A valid device ID and session repository are required');
     }
-    const client = createClient({ sessions, fetch: options.fetch });
-    const auth = createAuth(client, options);
+    // Hosts that inject only `log` receive warnings there too; messages never carry URLs or credentials.
+    const log = typeof options.log === 'function' ? options.log : console.info;
+    const warn = typeof options.warn === 'function' ? options.warn : typeof options.log === 'function' ? options.log : console.warn;
+    const client = createClient({ sessions, fetch: options.fetch, log, warn });
     const catalog = createCatalog(client);
     const feed = createFeed(client);
+    const auth = createAuth(client, { log, onSignOut: () => feed.clear() });
     const library = createLibrary(client);
     const nowUser = () => sessions.get()?.userId || null;
     return {
@@ -72,11 +75,16 @@ function createQishuiApi(options) {
                     case 'feed': data = await feed.songs({ scene: raw.scene, preference: raw.preference,
                         queue: raw.queue === 'explore' ? 'explore' : 'fm', first: raw.first === true, count: limit }); break;
                     case 'liked_songs': data = await library.likedSongs(); break;
-                    case 'like_song': await library.likeSong({ id: idOf(raw.id), liked: raw.liked }); data = null; break;
-                    case 'playlist_add_tracks':
-                        await library.editPlaylist({ operation: 'add', id: idOf(raw.id), ids: raw.ids }); data = null; break;
-                    case 'playlist_remove_tracks':
-                        await library.editPlaylist({ operation: 'remove', id: idOf(raw.id), ids: raw.ids }); data = null; break;
+                    // Edits shift playlist rows, so remembered page cursors are dropped even if the edit fails.
+                    case 'like_song':
+                        try { await library.likeSong({ id: idOf(raw.id), liked: raw.liked }); } finally { catalog.forgetPlaylist(); }
+                        data = null; break;
+                    case 'playlist_add_tracks': case 'playlist_remove_tracks': {
+                        const id = idOf(raw.id);
+                        try { await library.editPlaylist({ operation: operation === 'playlist_add_tracks' ? 'add' : 'remove', id, ids: raw.ids }); }
+                        finally { catalog.forgetPlaylist(id); }
+                        data = null; break;
+                    }
                     case 'recent_played': data = await library.recentPlayed({ limit, offset }); break;
                     case 'check_tracks': data = await library.checkTracks({ ids: raw.ids }); break;
                     case 'dislike_song':
@@ -89,7 +97,9 @@ function createQishuiApi(options) {
                 return { ok: true, data };
             } catch (error) {
                 // Only safe protocol errors cross IPC. Fetch exceptions may embed credential-bearing URLs.
-                if (error instanceof QishuiError && typeof operation === 'string' && operation.startsWith('login')) console.warn('[Qishui] Sign-in operation failed', error);
+                if (error instanceof QishuiError && typeof operation === 'string' && operation.startsWith('login')) {
+                    warn(`[Qishui] Sign-in operation failed: ${[error.code, error.stage, error.upstreamCode].filter(Boolean).join(' ')}`);
+                }
                 if (error instanceof QishuiError) return { ok: false, error: { code: error.code, message: error.message, upstreamCode: error.upstreamCode, stage: error.stage } };
                 return { ok: false, error: { code: 'invalid-response', message: 'Qishui operation failed' } };
             }

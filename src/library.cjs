@@ -53,7 +53,9 @@ async function likedPlaylist(platform) {
 
 async function likedSongs(platform) {
     const liked = await likedPlaylist(platform);
-    if (!liked) return { ids: [], whole: true, total: 0 };
+    // Not finding the liked playlist is not proof the account likes nothing; a complete empty
+    // answer would let a host drop every liked song it has synced.
+    if (!liked) throw new QishuiError('invalid-response', 'Qishui liked playlist was not found');
     const ids = new Set();
     let cursor = '';
     let whole = false;
@@ -85,6 +87,8 @@ async function recentPlayed(platform, limit, offset) {
         const data = await platform('/me/recent-played/', {
             count: PAGE_SIZE, cursor, media_type: 'track', scene: 'me_tab',
         }, true);
+        // A page without its list cannot also claim more pages; that would walk the cursor for nothing.
+        if (!Array.isArray(data.media) && data.has_more === true) throw new QishuiError('invalid-response', 'Qishui recent tracks are missing');
         const rows = Array.isArray(data.media) ? data.media : [];
         for (const row of rows) {
             const media = row?.media;

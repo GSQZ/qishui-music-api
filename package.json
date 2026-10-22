@@ -1,6 +1,6 @@
 {
     "name": "qishui-music-api",
-    "version": "0.2.1",
+    "version": "0.2.2",
     "description": "Qishui Music car protocol client for Node.js and Electron main processes",
     "license": "MIT",
     "author": "sayqz",

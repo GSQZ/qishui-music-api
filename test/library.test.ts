@@ -28,8 +28,15 @@ describe('Qishui car account reads', () => {
         expect(platform.mock.calls[0][2]).toBe(true);
         expect(platform.mock.calls[2][1]).toMatchObject({ playlist_id: '99', owner_id: '7', type: 1 });
     });
-    it('returns an empty, complete list when the account has no liked playlist', async () => {
-        const platform = vi.fn(async () => ({ playlists: [], has_more: false }));
+    it('rejects an account answer without a liked playlist instead of reporting a complete empty list', async () => {
+        const platform = vi.fn(async () => ({ playlists: [{ base_info: { id: '1', type: 2 } }], has_more: false }));
+        await expect(likedSongs(platform)).rejects.toMatchObject({ code: 'invalid-response' });
+        await expect(likedSongs(async () => ({ playlists: [], has_more: false }))).rejects.toMatchObject({ code: 'invalid-response' });
+    });
+    it('still reports a liked playlist that is explicitly empty as complete', async () => {
+        const platform = vi.fn(async (path: string) => path === '/me/playlist/'
+            ? { playlists: [{ base_info: { id: '99', type: 1 } }], has_more: false }
+            : { media_entities: [], has_more: false });
         await expect(likedSongs(platform)).resolves.toEqual({ ids: [], whole: true, total: 0 });
     });
     it('rejects a missing playlist list instead of reporting a complete empty account', async () => {
@@ -91,6 +98,15 @@ describe('Qishui car account reads', () => {
         expect([...first.items, ...second.items, ...third.items].map((song: { id: string }) => song.id))
             .toEqual(['1', '2', '3', '4', '5']);
         expect(third.nextOffset).toBe(5);
+    });
+    it('rejects a recent-played page that claims more pages without its list', async () => {
+        const platform = vi.fn(async () => ({ has_more: true, next_cursor: 'next' }));
+        await expect(recentPlayed(platform, 30, 0)).rejects.toMatchObject({ code: 'invalid-response' });
+        expect(platform).toHaveBeenCalledTimes(1);
+    });
+    it('keeps an empty listening history empty', async () => {
+        await expect(recentPlayed(async () => ({ has_more: false }), 30, 0)).resolves.toEqual({ items: [], hasMore: false, nextOffset: 0 });
+        await expect(recentPlayed(async () => ({ media: [], has_more: false }), 30, 0)).resolves.toEqual({ items: [], hasMore: false, nextOffset: 0 });
     });
     it('pages recent tracks by offset and turns their start timestamp into milliseconds', async () => {
         const platform = vi.fn(async () => ({
