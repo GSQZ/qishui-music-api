@@ -78,11 +78,16 @@ function createQishuiApi(options) {
                     case 'feed': data = await feed.songs({ scene: raw.scene, preference: raw.preference,
                         queue: raw.queue === 'explore' ? 'explore' : 'fm', first: raw.first === true, count: limit }); break;
                     case 'liked_songs': data = await library.likedSongs(); break;
-                    case 'like_song': await library.likeSong({ id: idOf(raw.id), liked: raw.liked }); data = null; break;
-                    case 'playlist_add_tracks':
-                        await library.editPlaylist({ operation: 'add', id: idOf(raw.id), ids: raw.ids }); data = null; break;
-                    case 'playlist_remove_tracks':
-                        await library.editPlaylist({ operation: 'remove', id: idOf(raw.id), ids: raw.ids }); data = null; break;
+                    // Edits shift playlist rows, so remembered page cursors are dropped even if the edit fails.
+                    case 'like_song':
+                        try { await library.likeSong({ id: idOf(raw.id), liked: raw.liked }); } finally { catalog.forgetPlaylist(); }
+                        data = null; break;
+                    case 'playlist_add_tracks': case 'playlist_remove_tracks': {
+                        const id = idOf(raw.id);
+                        try { await library.editPlaylist({ operation: operation === 'playlist_add_tracks' ? 'add' : 'remove', id, ids: raw.ids }); }
+                        finally { catalog.forgetPlaylist(id); }
+                        data = null; break;
+                    }
                     case 'recent_played': data = await library.recentPlayed({ limit, offset }); break;
                     case 'check_tracks': data = await library.checkTracks({ ids: raw.ids }); break;
                     case 'dislike_song':

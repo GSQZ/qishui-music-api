@@ -351,3 +351,28 @@ describe('stored account rejection during renewal', () => {
         expect(bodies[2].common_params).toEqual({});
     });
 });
+
+describe('playlist resume points through the API', () => {
+    const detail = (body: any) => {
+        const start = body.cursor === '0' ? 0 : Number(String(body.cursor).slice('opaque:'.length));
+        return Response.json({ data: { media_entities: Array.from({ length: 100 }, (_, i) => ({
+            track_entity: { base_info: { id: String(start + i + 1) } } })), has_more: start < 900, next_cursor: `opaque:${start + 100}` } });
+    };
+    it.each([
+        ['nothing', null, null, 'opaque:100'],
+        ['playlist_add_tracks', '/playlist/append/', { id: '99', ids: ['1'] }, '0'],
+        ['playlist_remove_tracks', '/playlist/delete/', { id: '99', ids: ['1'] }, '0'],
+        ['like_song', '/media/collect/', { id: '1', liked: true }, '0'],
+    ])('resumes the next page unless %s changed playlists in between', async (operation, path, params, cursor) => {
+        const setup = harness({ sessions: repository(credential()), request: (url, { body }) =>
+            url.includes('/playlist/detail/') ? detail(JSON.parse(body)) : success() });
+        expect(await setup.api.request('playlist_tracks', { id: '99', limit: 100, offset: 0 })).toMatchObject({ ok: true });
+        if (path) {
+            expect(await setup.api.request(operation as any, params as any)).toEqual({ ok: true, data: null });
+            expect(setup.calls.some(call => call.url.includes(path))).toBe(true);
+        }
+        expect(await setup.api.request('playlist_tracks', { id: '99', limit: 100, offset: 100 })).toMatchObject({ ok: true });
+        const reads = setup.calls.filter(call => call.url.includes('/playlist/detail/'));
+        expect(JSON.parse(reads[1].options.body).cursor).toBe(cursor);
+    });
+});

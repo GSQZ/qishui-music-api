@@ -35,18 +35,23 @@ async function search(platform, query, type, limit, offset) {
     }
     return { items: type === 'track' ? items.map(publicTrack) : items, hasMore: more && items.length > 0, nextOffset: offset + items.length };
 }
-// Read from the beginning when a caller supplies an offset: playlist cursors are not row numbers.
-async function playlistPage(platform, id, ownerId, limit, offset) {
+// Playlist cursors are not row numbers, so an offset is reached by walking from the beginning.
+// `marks` (optional) remembers the cursor found after each row count so the next page can resume there.
+async function playlistPage(platform, id, ownerId, limit, offset, marks) {
     let cursor = '0';
     let consumed = 0;
+    for (const [position, mark] of marks?.positions || []) {
+        if (position <= offset && position > consumed) { consumed = position; cursor = mark; }
+    }
     const seen = new Set();
     const items = [];
-    let collection;
+    let collection = consumed ? marks.collection : undefined;
     let hasMore = false;
     while (items.length < limit && seen.size < 500) {
         seen.add(cursor);
         const data = await platform('/playlist/detail/', { playlist_id: id, owner_id: ownerId || '', count: 100, cursor, type: null });
         collection ||= data.playlist;
+        if (marks && cursor === '0') marks.collection = data.playlist;
         const batch = array(data.media_entities, 'playlist tracks');
         const start = Math.max(0, offset - consumed);
         const remaining = limit - items.length;
@@ -56,6 +61,7 @@ async function playlistPage(platform, id, ownerId, limit, offset) {
         const upstreamMore = data.has_more === true;
         const unused = consumed > offset + items.length;
         hasMore = unused || upstreamMore;
+        if (marks && upstreamMore && batch.length && next && !seen.has(next)) marks.positions.set(consumed, next);
         if (!upstreamMore || items.length === limit) break;
         if (!batch.length || !next || seen.has(next)) throw new QishuiError('invalid-response', 'Playlist cursor did not advance');
         cursor = next;
@@ -63,8 +69,34 @@ async function playlistPage(platform, id, ownerId, limit, offset) {
     if (seen.size >= 500 && items.length < limit && hasMore) throw new QishuiError('invalid-response', 'Playlist page limit reached');
     return { items, collection, hasMore: hasMore && items.length > 0, nextOffset: offset + items.length };
 }
-function createCatalog({ platform }) {
+// Short-lived, per-account resume points for sequential playlist pages. Entries expire, are capped,
+// are dropped after a failed walk or an edit through this API, and never outlive an account switch.
+const CURSOR_TTL_MS = 5 * 60 * 1000;
+const CURSOR_PLAYLISTS = 32;
+function createPlaylistCursors(sessions, now = Date.now) {
+    const entries = new Map();
+    let account = null;
+    const keyOf = (id, ownerId) => `${id}:${ownerId || ''}`;
     return {
+        get(id, ownerId) {
+            const user = sessions?.get()?.userId || '';
+            if (user !== account) { entries.clear(); account = user; }
+            const key = keyOf(id, ownerId);
+            let entry = entries.get(key);
+            if (entry && now() - entry.at > CURSOR_TTL_MS) entry = undefined;
+            entries.delete(key);
+            entry ||= { at: now(), positions: new Map(), collection: undefined };
+            entries.set(key, entry);
+            while (entries.size > CURSOR_PLAYLISTS) entries.delete(entries.keys().next().value);
+            return entry;
+        },
+        forget(id) { for (const key of [...entries.keys()]) if (id == null || key.startsWith(`${id}:`)) entries.delete(key); },
+    };
+}
+function createCatalog({ platform, sessions }, { now } = {}) {
+    const cursors = createPlaylistCursors(sessions, now);
+    return {
+        forgetPlaylist: id => cursors.forget(id),
         search: ({ query, limit, offset }) => search(platform, query, 'track', limit, offset),
         search_playlists: ({ query, limit, offset }) => search(platform, query, 'playlist', limit, offset),
         async track(id) {
@@ -73,7 +105,10 @@ function createCatalog({ platform }) {
             if (!media?.track_entity) throw new QishuiError('not-playable', 'Qishui did not return the track');
             return media.track_entity;
         },
-        playlist_tracks: ({ id, ownerId, limit, offset }) => playlistPage(platform, id, ownerId, limit, offset),
+        async playlist_tracks({ id, ownerId, limit, offset }) {
+            try { return await playlistPage(platform, id, ownerId, limit, offset, cursors.get(id, ownerId)); }
+            catch (error) { cursors.forget(id); throw error; }
+        },
         async user_playlists({ limit, offset }) {
             const items = [];
             for (const [path, field, owned] of [['/me/playlist/', 'playlists', true], ['/me/collection/mixed/', 'mixed_collections', false]]) {

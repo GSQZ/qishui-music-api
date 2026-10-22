@@ -29,6 +29,8 @@ const result = await api.request('search', { query: '晴天', limit: 20, offset:
 
 `request` 返回 `{ ok: true, data }` 或 `{ ok: false, error: { code, message, upstreamCode?, stage? } }`。操作名由只读的 `QISHUI_OPERATIONS` 导出；TypeScript 类型与入口一起发布。设备 ID 必须由 `createQishuiDeviceId()` 生成，恢复时用 `isQishuiDeviceId()` 校验。推荐流 `feed` 接受 `scene`（`feed_modes` 返回的场景 ID）或 `preference`（小写的偏好模式名，如 `familiar`、`fresh`），两者互斥，格式不对时在请求前返回 `invalid-response`。
 
+歌单游标不是行号，`playlist_tracks` 在 5 分钟内按账号、歌单和 owner 记住已走过的游标，顺序翻页时接着读；读取失败、通过本包喜欢或编辑歌单、切换账号时丢弃这些记录。
+
 账号读取与写入操作：`liked_songs`、`like_song`（`{ id, liked }`）、`playlist_add_tracks` / `playlist_remove_tracks`（`{ id, ids }`，单次最多 100 首）、`recent_played`、`check_tracks`（`{ ids }`）、`dislike_song`（`{ id, disliked }`）。写操作与账号读取需要已登录会话；车机接口没有专辑详情、新建歌单、收藏歌单/专辑的端点，这些操作不提供。
 
 `sessions.get/set/clear` 都是同步方法，每次写入或清除都要增加 `revision`。宿主负责存储、加密和 IPC 白名单；包不读写磁盘、不导入 Electron，也不开本地服务。`fetch` 可替换为 Electron 的 `net.fetch`。`log` / `warn`（可选，`warn` 未注入时用 `log`）只接收不含地址和凭据的诊断文本，例如被拒的媒体主机名。会话只允许在可信主进程内使用，不要将 ticket、私钥或原始会话交给网页，也不要记录会话内容。
