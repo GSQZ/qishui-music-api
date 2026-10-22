@@ -17,7 +17,7 @@ function checked(data) {
 }
 const HOSTS = ['365yg.com', 'douyinvod.com', 'douyinscdn.com', 'bytefcdn.com', 'bytecdn.cn', 'byteicdn.com', 'ibytedtos.com',
     'pstatp.com', 'snssdk.com', 'bytedance.com', 'bytetos.com', 'volcvideo.com', 'volccdn.com', 'volces.com',
-    'volcengineapi.com', 'douyin.com', 'qishui.com', 'zijieapi.com'];
+    'volcengineapi.com', 'douyin.com', 'qishui.com', 'zijieapi.com', 'zjcdn.com'];
 function mediaUrl(raw) {
     let url;
     try { url = new URL(raw); } catch { throw new QishuiError('invalid-response', 'Invalid Qishui media URL'); }
@@ -27,7 +27,11 @@ function mediaUrl(raw) {
     }
     return url.href;
 }
-function createClient({ sessions, fetch: fetcher = globalThis.fetch }) {
+// Names only the host of a refused media URL; its path and query may carry signatures.
+function mediaHost(raw) {
+    try { return new URL(raw).hostname || 'unknown host'; } catch { return 'invalid URL'; }
+}
+function createClient({ sessions, fetch: fetcher = globalThis.fetch, warn = console.warn }) {
     let tokenEntry;
     async function http(url, { body, headers = {}, form = false } = {}) {
         let response;
@@ -100,6 +104,6 @@ function createClient({ sessions, fetch: fetcher = globalThis.fetch }) {
         });
         return data.data && typeof data.data === 'object' ? data.data : {};
     }
-    return { http, query, platform, command, sessions };
+    return { http, query, platform, command, sessions, warn };
 }
-module.exports = { createClient, QishuiError, mediaUrl };
+module.exports = { createClient, QishuiError, mediaUrl, mediaHost };

@@ -21,7 +21,9 @@ function createQishuiApi(options) {
         || !['get', 'set', 'clear'].every(method => typeof sessions[method] === 'function')) {
         throw new TypeError('A valid device ID and session repository are required');
     }
-    const client = createClient({ sessions, fetch: options.fetch });
+    // Hosts that inject only `log` receive warnings there too; messages never carry URLs or credentials.
+    const warn = typeof options.warn === 'function' ? options.warn : typeof options.log === 'function' ? options.log : console.warn;
+    const client = createClient({ sessions, fetch: options.fetch, warn });
     const auth = createAuth(client, options);
     const catalog = createCatalog(client);
     const feed = createFeed(client);

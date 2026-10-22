@@ -5,7 +5,7 @@ import type { QishuiSession, QishuiBridgeResult, QishuiOperation, QishuiParams, 
 let session: QishuiSession | null = null;
 let revision = 0;
 const deviceId = createQishuiDeviceId();
-const api = createQishuiApi({ deviceId, fetch: globalThis.fetch, sessions: {
+const api = createQishuiApi({ deviceId, fetch: globalThis.fetch, warn: message => void message, sessions: {
     deviceId, get revision() { return revision; }, get: () => session,
     set: value => { session = value; revision++; }, clear: () => { session = null; revision++; },
 } });

@@ -60,6 +60,8 @@ export interface QishuiApiOptions {
     sessions: QishuiSessionStore;
     fetch?: typeof globalThis.fetch;
     log?: (message: string) => void;
+    /** Diagnostics such as refused media hosts; defaults to `log`. Messages carry host names, never URLs or credentials. */
+    warn?: (message: string) => void;
 }
 export interface QishuiApi {
     request<T = unknown>(operation: QishuiOperation, params?: QishuiParams): Promise<QishuiBridgeResult<T>>;

@@ -43,6 +43,21 @@ describe('public Qishui API', () => {
         }
         expect(fetch).not.toHaveBeenCalled();
     });
+    it.each([false, true])('sends refused media hosts to the injected warn, or to log without one (warn: %s)', async withWarn => {
+        const deviceId = createQishuiDeviceId();
+        const sessions = { deviceId, revision: 0, get: () => null, set: vi.fn(), clear: vi.fn() };
+        const fetch = vi.fn(async (url: string) => url.includes('/client/token/get/') ? Response.json({ client_token: 'fixture-token' })
+            : Response.json({ data: { media_list: [{ media_id: '1', track_entity: { base_info: { id: '1' }, player_info: { full: { video_model_info: {
+                video_model: { video_list: [{ main_url: 'https://media.unknown.test/a.m4a?sign=fixture-private' }] } } } } } }] } }));
+        const log = vi.fn();
+        const warn = vi.fn();
+        const api = createQishuiApi({ deviceId, sessions, fetch, log, ...(withWarn ? { warn } : {}) });
+        const result = await api.request('audio', { id: '1', quality: 'standard' });
+        expect(result).toEqual({ ok: false, error: { code: 'invalid-response', message: 'Untrusted Qishui media host' } });
+        const sink = withWarn ? warn : log;
+        expect(sink).toHaveBeenCalledWith('[Qishui] Skipped untrusted media hosts: media.unknown.test');
+        expect(JSON.stringify([log.mock.calls, warn.mock.calls])).not.toContain('fixture-private');
+    });
     it('does not expose request URLs or transport exception text', async () => {
         const { api } = setup(vi.fn().mockRejectedValue(new Error('https://private.test/?token=fixture-private')));
         const result = await api.request('search', { query: 'song' });
