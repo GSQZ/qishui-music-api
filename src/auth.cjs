@@ -43,17 +43,30 @@ function createAuth(client, { log = console.info } = {}) {
         const old = sessions.get();
         if (!old) return null;
         const revision = sessions.revision;
-        let candidate = old;
-        if (old.expiresAt < Date.now() + 3600000) {
-            const result = await http(query(`https://open.qishui.com${PREFIX}/access/code/refresh/`, { access_code: old.accessCode }, old.deviceId));
-            const access = result.data.data || result.data;
-            candidate = await ticket({ ...access, open_id: access.open_id || access.open_uid || old.openId }, old, old.deviceId);
+        // Every request here carries this account's own credentials, never the public client token,
+        // so an explicit platform rejection means the stored session cannot be renewed.
+        const signOut = () => {
+            if (revision !== sessions.revision) return;
+            sessions.clear();
+            log('[Qishui] Stored account was rejected; signed out');
+        };
+        try {
+            let candidate = old;
+            if (old.expiresAt < Date.now() + 3600000) {
+                const result = await http(query(`https://open.qishui.com${PREFIX}/access/code/refresh/`, { access_code: old.accessCode }, old.deviceId));
+                const access = result.data.data || result.data;
+                candidate = await ticket({ ...access, open_id: access.open_id || access.open_uid || old.openId }, old, old.deviceId);
+            }
+            const user = await getUser(candidate);
+            if (user.id !== old.userId) { signOut(); throw new QishuiError('auth-required', 'Qishui account identity changed'); }
+            if (revision !== sessions.revision) return null;
+            sessions.set({ ...candidate, userId: user.id, user });
+            return user;
+        } catch (error) {
+            // HTTP 401/403 without a platform code, network and parse failures keep the session for a later retry.
+            if (error instanceof QishuiError && error.code === 'auth-required' && error.upstreamCode) signOut();
+            throw error;
         }
-        const user = await getUser(candidate);
-        if (user.id !== old.userId) throw new QishuiError('auth-required', 'Qishui account identity changed');
-        if (revision !== sessions.revision) return null;
-        sessions.set({ ...candidate, userId: user.id, user });
-        return user;
     }
     return {
         async start() {

@@ -6,6 +6,7 @@
 - 不可信主机的候选地址（含 `url_player_info`）改为跳过，只有某个版本的未加密候选全部不可信时才返回 `invalid-response`，不会因此退回试听片段；被拒的主机名通过 `warn`（未注入时用 `log`）记录，不记路径和查询串。新增可选的 `warn` 注入。
 - 播放与扫码失败日志改走注入的 `log` / `warn`，只写纯文本，不再把错误对象交给 `console`；删去 `resolveAudio` 未使用的 `onAudioSource` 参数。
 - 网络异常和非 JSON 答复保留原始异常为 `cause`，便于主进程排查；`request` 返回的错误仍只有 `code`、`message`、`upstreamCode`、`stage`。
+- `login_status` 续期时账号凭据被平台明确拒绝（access code 刷新、ticket 交换、`/me/info/` 返回鉴权错误码，或账号身份变化）会调用 `sessions.clear()` 并重置推荐流，不再每次带着已吊销的凭据续期；公共读取的客户端令牌过期、无平台错误码的 HTTP 401/403、网络错误不会清除账号。
 
 ## 0.2.1
 

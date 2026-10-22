@@ -58,7 +58,10 @@ function createQishuiApi(options) {
                         if (data.state === 'confirmed') feed.clear();
                         break;
                     case 'login_qr_cancel': auth.cancel(raw.key); data = null; break;
-                    case 'login_status': data = await auth.status(); break;
+                    case 'login_status':
+                        // A rejected stored account is signed out by auth; its feed queues go with it.
+                        data = await auth.status().catch(error => { if (!sessions.get()) feed.clear(); throw error; });
+                        break;
                     case 'logout': auth.logout(); feed.clear(); data = null; break;
                     case 'song_detail': data = publicTrack(await catalog.track(p.id)); break;
                     case 'lyrics': data = (await catalog.track(p.id)).display_info?.lyric_info || {}; break;

@@ -274,3 +274,80 @@ describe('ticket-guard remains separate from public tokens', () => {
         expect(setup.sessions.set).not.toHaveBeenCalled();
     });
 });
+
+describe('stored account rejection during renewal', () => {
+    const stored = (expiresAt = Date.now() + 86400000) => ({ ...credential(), accessCode: 'fixture-access', openId: 'fixture-open',
+        user: { id: 'fixture-user', nickname: '', isVip: false }, expiresAt });
+    const guardHeaders = { 'bd-ticket-guard-server-data': Buffer.from(JSON.stringify({
+        ticket: 'fixture-ticket-2', ts_sign: 'fixture-signature', client_cert: 'fixture-cert' })).toString('base64') };
+    it.each([28001003, 28001007, 28001008, 10007])('signs out when /me/info/ rejects the account ticket (%s)', async code => {
+        const setup = harness({ sessions: repository(stored()), request: url => url.includes('/me/info/') ? Response.json({ err_no: code }) : success() });
+        expect(await setup.api.request('login_status'))
+            .toMatchObject({ ok: false, error: { code: 'auth-required', upstreamCode: String(code), stage: 'account' } });
+        expect(setup.sessions.clear).toHaveBeenCalledTimes(1);
+        expect(setup.sessions.get()).toBeNull();
+        expect(await setup.api.request('login_status')).toEqual({ ok: true, data: null });
+        expect(setup.calls.filter(call => call.url.includes('/me/info/'))).toHaveLength(1);
+    });
+    it.each(['/access/code/refresh/', '/get_access_ticket/'])('signs out when an expiring account cannot be renewed at %s', async path => {
+        const setup = harness({ sessions: repository(stored(Date.now() + 60000)), request: url => {
+            if (url.includes(path)) return Response.json({ err_no: 28001007 });
+            if (url.includes('/access/code/refresh/')) return Response.json({ data: { access_code: 'fixture-access-2', expires_time: 21600 } });
+            if (url.includes('/get_access_ticket/')) return Response.json({ data: {} }, { headers: guardHeaders });
+            return Response.json({ data: { my_info: { id: 'fixture-user' } } });
+        } });
+        expect(await setup.api.request('login_status')).toMatchObject({ ok: false, error: { code: 'auth-required' } });
+        expect(setup.sessions.clear).toHaveBeenCalledTimes(1);
+    });
+    it('signs out when the renewed ticket identifies a different account', async () => {
+        const setup = harness({ sessions: repository(stored()), request: () => Response.json({ data: { my_info: { id: 'another-user' } } }) });
+        expect(await setup.api.request('login_status')).toMatchObject({ ok: false, error: { code: 'auth-required' } });
+        expect(setup.sessions.clear).toHaveBeenCalledTimes(1);
+    });
+    it.each([
+        ['HTTP 401 without a platform code', () => new Response(null, { status: 401 })],
+        ['HTTP 403 without a platform code', () => new Response(null, { status: 403 })],
+        ['HTTP 500', () => new Response(null, { status: 500 })],
+        ['an unrelated platform error', () => Response.json({ err_no: 12345 })],
+        ['a transport failure', () => { throw new Error('fixture transport failure'); }],
+        ['a response that is not JSON', () => new Response('not json')],
+    ])('keeps the stored account after %s', async (_label, answer) => {
+        const setup = harness({ sessions: repository(stored()), request: answer as () => Response });
+        expect((await setup.api.request('login_status')).ok).toBe(false);
+        expect(setup.sessions.clear).not.toHaveBeenCalled();
+        expect(setup.sessions.get()).toMatchObject({ userId: 'fixture-user' });
+    });
+    it('does not sign out an account stored while the rejected renewal was in flight', async () => {
+        const held = deferred<Response>();
+        const setup = harness({ sessions: repository(stored()), request: () => held.promise });
+        const pending = setup.api.request('login_status');
+        await vi.waitFor(() => expect(setup.calls).toHaveLength(1));
+        const replacement = { ...stored(), userId: 'next-user' };
+        setup.sessions.set(replacement);
+        held.resolve(Response.json({ err_no: 28001007 }));
+        expect(await pending).toMatchObject({ ok: false, error: { code: 'auth-required' } });
+        expect(setup.sessions.clear).not.toHaveBeenCalled();
+        expect(setup.sessions.get()).toBe(replacement);
+    });
+    it('does not sign out when a public read exhausts its client-token recovery', async () => {
+        const setup = harness({ sessions: repository(stored()), request: () => expired() });
+        expect(await setup.api.request('search', { query: 'song' }))
+            .toMatchObject({ ok: false, error: { code: 'auth-required', upstreamCode: '28001008' } });
+        expect(setup.sessions.clear).not.toHaveBeenCalled();
+    });
+    it('restarts the recommendation stream after a rejected account is signed out', async () => {
+        let rejecting = false;
+        const bodies: any[] = [];
+        const setup = harness({ sessions: repository(stored()), request: (url, { body }) => {
+            if (url.includes('/me/info/')) return rejecting ? Response.json({ err_no: 28001003 }) : Response.json({ data: { my_info: { id: 'fixture-user' } } });
+            bodies.push(JSON.parse(body));
+            return success();
+        } });
+        await setup.api.request('feed'); await setup.api.request('feed');
+        rejecting = true;
+        expect((await setup.api.request('login_status')).ok).toBe(false);
+        await setup.api.request('feed');
+        expect(bodies.map(body => body.is_first_request)).toEqual([true, false, true]);
+        expect(bodies[2].common_params).toEqual({});
+    });
+});
